@@ -8,23 +8,29 @@ VOICE_PROFILES = {
         "category": "Standard",
         "speed": 0.9,
         "pitch": 0,
-        "model": "pt_BR-faber-medium"
+        "model": "pt_BR-faber-medium",
+        "stability": 0.7,
+        "clarity": 0.5
     },
     "Aurora": {
         "name": "Aurora",
-        "description": "Feminina, suave, velocidade 1.0, pitch levemente alto.",
+        "description": "Feminina, fluida e natural, excelente para leitura de textos longos.",
         "category": "Standard",
         "speed": 1.0,
-        "pitch": 5,
-        "model": "pt_BR-faber-medium"
+        "pitch": 0,
+        "model": "pt_BR-ricardo-medium",
+        "stability": 0.6,
+        "clarity": 0.6
     },
     "Titan": {
         "name": "Titan",
-        "description": "Masculina, forte, velocidade 0.85, pitch baixo.",
+        "description": "Masculina, robusta e direta, ideal para anúncios e chamadas.",
         "category": "Standard",
-        "speed": 0.85,
-        "pitch": -5,
-        "model": "pt_BR-faber-medium"
+        "speed": 1.0,
+        "pitch": 0,
+        "model": "pt_BR-ricardo-medium",
+        "stability": 0.8,
+        "clarity": 0.5
     },
     "Lyra": {
         "name": "Lyra",
@@ -32,15 +38,19 @@ VOICE_PROFILES = {
         "category": "Standard",
         "speed": 1.1,
         "pitch": 3,
-        "model": "pt_BR-faber-medium"
+        "model": "pt_BR-faber-medium",
+        "stability": 0.5,
+        "clarity": 0.7
     },
     "Nova": {
         "name": "Nova",
-        "description": "Neutra, clara, velocidade 1.0, pitch neutro.",
+        "description": "Neutra, clara, excelente para assistentes virtuais.",
         "category": "Standard",
         "speed": 1.0,
         "pitch": 0,
-        "model": "pt_BR-faber-medium"
+        "model": "pt_BR-ricardo-medium",
+        "stability": 0.6,
+        "clarity": 0.6
     },
     "Orion": {
         "name": "Orion",
