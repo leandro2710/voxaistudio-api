@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+piper-tts
+requests
+python-multipart
+python-slugify
