@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 piper-tts
+onnxruntime
 requests
 python-multipart
 python-slugify
