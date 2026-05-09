@@ -79,17 +79,25 @@ def ensure_model(model_name: str):
     
     if not os.path.exists(onnx_path):
         print(f"Downloading model {model_name} from HuggingFace...")
-        # Piper models repository URL (pt_BR-faber-medium is standard)
-        base_url = f"https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/pt/pt_BR/faber/medium/"
+        # Format: pt_BR-name-quality
+        parts = model_name.split("-")
+        if len(parts) < 3:
+            print(f"Invalid model name format: {model_name}")
+            return False
+            
+        voice_name = parts[1] # faber, ricardo
+        quality = parts[2] # medium
+        
+        base_url = f"https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/pt/pt_BR/{voice_name}/{quality}/"
         
         try:
-            r = requests.get(f"{base_url}pt_BR-faber-medium.onnx", stream=True, timeout=30)
+            r = requests.get(f"{base_url}{model_name}.onnx", stream=True, timeout=60)
             r.raise_for_status()
             with open(onnx_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
             
-            r = requests.get(f"{base_url}pt_BR-faber-medium.onnx.json", stream=True, timeout=10)
+            r = requests.get(f"{base_url}{model_name}.onnx.json", stream=True, timeout=20)
             r.raise_for_status()
             with open(config_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
@@ -113,72 +121,58 @@ def run_piper(text: str, voice_profile: dict, output_path: str):
         config_path = f"models/{model_name}.onnx.json"
         speed = voice_profile.get("speed", 1.0)
         
-        # Diagnostics
-        print(f"Synthesizing: '{text[:50]}...' with {model_name} at speed {speed}")
+        # Piper noise parameters for more natural sound
+        # Stability (0.0 to 1.0) -> noise_scale (Lower stability = higher noise_scale)
+        # Default Piper noise_scale is 0.667
+        stability = voice_profile.get("stability", 0.5)
+        noise_scale = 1.0 - (stability * 0.8) # Range approx 0.2 to 1.0
+        
+        # Expressiveness (0.0 to 1.0) -> noise_w (phoneme duration variability)
+        # Default Piper noise_w is 0.8
+        expressiveness = voice_profile.get("expressiveness", 0.6)
+        noise_w = 0.2 + (expressiveness * 0.8) # Range approx 0.2 to 1.0
 
-        # Try to use Piper library directly first (more robust on many hosts)
+        # Diagnostics
+        print(f"Synthesizing with {model_name}: speed={speed}, noise_scale={noise_scale:.2f}, noise_w={noise_w:.2f}")
+
+        # Try to use Piper library directly first
         if PiperVoice:
             try:
-                print("Using Piper Python library directly...")
                 voice = PiperVoice.load(model_path, config_path)
-                
-                # length_scale is inverse of speed
                 voice.length_scale = 1.0 / speed
+                voice.noise_scale = noise_scale
+                voice.noise_w = noise_w
                 
                 with wave.open(output_path, "wb") as wav_file:
                     voice.synthesize(text, wav_file)
                 
                 if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                    print(f"Successfully generated audio via library at {output_path}")
                     return True
             except Exception as lib_err:
-                print(f"Library synthesis failed: {lib_err}. Falling back to CLI...")
+                print(f"Library synthesis failed: {lib_err}")
 
         # Fallback to CLI
         piper_binary = shutil.which("piper") or shutil.which("piper-tts")
-        
         if not piper_binary:
-            # Try some common locations if which fails
-            common_paths = [
-                "/usr/local/bin/piper",
-                "/usr/bin/piper",
-                os.path.expanduser("~/.local/bin/piper"),
-                os.path.expanduser("~/.local/bin/piper-tts")
+            for p in ["/usr/local/bin/piper", "/usr/bin/piper"]:
+                if os.path.exists(p): piper_binary = p; break
+        
+        if piper_binary:
+            cmd = [
+                piper_binary,
+                "--model", model_path,
+                "--output_file", output_path,
+                "--length_scale", str(1.0 / speed),
+                "--noise_scale", str(noise_scale),
+                "--noise_w", str(noise_w)
             ]
-            for p in common_paths:
-                if os.path.exists(p):
-                    piper_binary = p
-                    break
-        
-        if not piper_binary:
-            print("ERROR: Piper binary not found in PATH or common locations.")
-            return False
-
-        print(f"Using piper binary: {piper_binary}")
-        
-        cmd = [
-            piper_binary,
-            "--model", model_path,
-            "--output_file", output_path,
-            "--length_scale", str(1.0 / speed)
-        ]
-        
-        process = subprocess.Popen(
-            cmd, 
-            stdin=subprocess.PIPE, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE, 
-            text=True
-        )
-        stdout, stderr = process.communicate(input=text)
-        
-        if process.returncode != 0:
-            print(f"Piper execution failed (code {process.returncode}): {stderr}")
-            return False
+            process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            process.communicate(input=text)
+            return os.path.exists(output_path) and os.path.getsize(output_path) > 0
             
-        return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+        return False
     except Exception as e:
-        print(f"Critical error in run_piper: {e}")
+        print(f"Synthesis error: {e}")
         return False
 
 @app.post("/synthesize")
@@ -200,13 +194,14 @@ async def synthesize(request: SynthesizeRequest):
     output_filename = f"voxai_{uuid.uuid4()}.wav"
     output_path = os.path.join(temp_dir, output_filename)
     
-    # Use requested parameters or profile defaults
-    # Speed in request overrides profile speed if provided
-    speed = request.speed if request.speed is not None else profile.get("speed", 1.0)
-    
-    # We pass a modified profile for the run
+    # Blend request parameters with profile defaults
     run_profile = profile.copy()
-    run_profile["speed"] = speed
+    if request.speed is not None: run_profile["speed"] = request.speed
+    else: run_profile["speed"] = profile.get("speed", 1.0)
+    
+    # Map high-level stability/expressiveness to Piper params
+    run_profile["stability"] = request.stability
+    run_profile["expressiveness"] = request.expressiveness
     
     success = run_piper(request.text, run_profile, output_path)
     
